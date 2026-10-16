@@ -9,7 +9,7 @@ name = "wabt-package"
 authors = [{ name = "o-murphy", email = "thehelixpg@gmail.com" }]
 description = "WABT, the WebAssembly Binary Toolkit (wasm2c, wat2wasm, wasm2wat, ...) as prebuilt binaries and the wasm2c runtime"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 keywords = ["wabt", "webassembly", "wasm", "wasm2c", "wat2wasm", "wasm2wat"]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE.md", "wabt/LICENSE"]
@@ -19,8 +19,6 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -111,7 +109,7 @@ ignore = []
 [tool.pyright]
 include = ["src", "tests"]
 exclude = ["wabt", "build"]
-pythonVersion = "3.10"
+pythonVersion = "3.12"
 typeCheckingMode = "strict"
 
 [dependency-groups]
