@@ -7,6 +7,8 @@ All metadata lives in pyproject.toml; this file only wires build_wabt.build() in
   executable bit, so it is put back on the built copies;
 - sdist records the WABT version next to the sources, because the unpacked sdist has no git metadata to
   `git describe`;
+- the distribution claims to have extension modules, so that the files go to platlib (not purelib): auditwheel
+  refuses to repair a wheel with executables in purelib;
 - bdist_wheel tags the wheel py3-none-<platform>: it holds executables, not a Python extension, so it does not
   depend on the interpreter or its ABI, and one build per platform serves every Python.
 """
@@ -15,7 +17,7 @@ import os
 import stat
 import sys
 
-from setuptools import setup
+from setuptools import Distribution, setup
 from setuptools.command.build_py import build_py
 from setuptools.command.sdist import sdist
 
@@ -26,6 +28,11 @@ except ImportError:  # setuptools < 70.1
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_wabt
+
+
+class BinaryDistribution(Distribution):
+    def has_ext_modules(self):
+        return True
 
 
 class BuildPyWithWabt(build_py):
@@ -61,9 +68,10 @@ class Py3NonePlatformWheel(bdist_wheel):
 
 
 setup(
+    distclass=BinaryDistribution,
     cmdclass={
         "build_py": BuildPyWithWabt,
         "sdist": SdistWithWabtVersion,
         "bdist_wheel": Py3NonePlatformWheel,
-    }
+    },
 )
