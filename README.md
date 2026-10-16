@@ -33,6 +33,12 @@ wabt.runtime_dir()                                 # directory of wasm-rt.h, was
 wabt.wabt_version()                                # "1.0.42"
 ```
 
+### SIMD
+
+The C that `wasm2c` writes for a module with SIMD instructions includes `<simde/wasm/simd128.h>`. The package does not
+ship [simde](https://github.com/simd-everywhere/simde) (neither do WABT's own releases, as far as the install rules of
+1.0.42 go): add its headers with `-I` when compiling such a module. Modules without SIMD need nothing but `runtime_dir()`.
+
 ## Wheels
 
 `py3-none-<platform>` wheels (the executables do not depend on the interpreter): Linux manylinux and musllinux
