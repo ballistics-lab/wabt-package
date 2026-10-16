@@ -27,10 +27,10 @@ Each tool is a console script; `python -m wabt_package wat2wasm ...` runs one wi
 ```python
 import wabt_package as wabt
 
-wabt.run("wat2wasm", "in.wat", "-o", "out.wasm")   # subprocess.run, check=True by default
-wabt.get_executable("wasm2c")                      # pathlib.Path
-wabt.runtime_dir()                                 # directory of wasm-rt.h, wasm-rt-impl.c, ...
-wabt.wabt_version()                                # "1.0.42"
+wabt.run("wat2wasm", "in.wat", "-o", "out.wasm")  # subprocess.run, check=True by default
+wabt.get_executable("wasm2c")  # pathlib.Path
+wabt.runtime_dir()  # directory of wasm-rt.h, wasm-rt-impl.c, ...
+wabt.wabt_version()  # "1.0.42"
 ```
 
 ### SIMD
