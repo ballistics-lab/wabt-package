@@ -1,0 +1,230 @@
+name: Upload Python Package
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+  workflow_dispatch:
+
+# pull_request is build-only: no job below grants publish permissions for it.
+run-name: >
+  Build & Publish → ${{ github.event_name == 'push' && 'PyPI' ||
+      'Build Only' }}
+
+concurrency:
+  group: publish-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-sdist:
+    name: Build SDist
+    runs-on: ubuntu-latest
+    env:
+      # PyPI rejects local version segments (+g<hash>): strip them only when this run publishes.
+      SETUPTOOLS_SCM_OVERRIDES: ${{ github.event_name == 'push' && '{local_scheme = "no-local-version"}' || '' }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # required for setuptools-scm to see tags
+          submodules: true # wabt; its nested picosha2 is initialised below
+
+      - name: Fetch the one nested submodule WABT needs
+        run: git -C wabt submodule update --init --depth 1 third_party/picosha2
+
+      - name: Check that the tag names the WABT release of the submodule
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          WABT=$(git -C wabt describe --tags --exact-match | sed 's/^v//')
+          if [[ "$TAG" != "$WABT".* ]]; then
+            echo "tag $GITHUB_REF_NAME does not start with the submodule's WABT release ($WABT)"
+            exit 1
+          fi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.11"
+          github-token: ${{ github.token }}
+
+      - name: Build sdist
+        run: uv build --sdist --out-dir dist
+        shell: bash
+
+      - name: list ./dist
+        run: ls ./dist
+        shell: bash
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-sdist
+          path: ./dist
+          retention-days: 14
+
+  build-wheels:
+    name: Build wheels on ${{ matrix.os }} / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64 (manylinux, musllinux)
+            artifact_key: linux-x64
+            os: ubuntu-latest
+            cibw_archs: "x86_64"
+            cibw_platform: linux
+
+          - name: Linux ARM64 (manylinux, musllinux)
+            artifact_key: linux-arm64
+            os: ubuntu-24.04-arm
+            cibw_archs: "aarch64"
+            cibw_platform: linux
+
+          - name: Windows x64
+            artifact_key: windows-x64
+            os: windows-latest
+            cibw_archs: "AMD64"
+            cibw_platform: windows
+
+          - name: Windows ARM64
+            artifact_key: windows-arm64
+            os: windows-11-arm
+            cibw_archs: "ARM64"
+            cibw_platform: windows
+
+          - name: macOS Apple Silicon
+            artifact_key: macos-arm64
+            os: macos-26
+            cibw_archs: "arm64"
+            cibw_platform: macos
+
+          - name: macOS Intel
+            artifact_key: macos-x86_64
+            os: macos-26-intel
+            cibw_archs: "x86_64"
+            cibw_platform: macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # required for setuptools-scm to see tags
+          submodules: true
+
+      # On the host, so that the cibuildwheel containers (which have no credentials for it) find it in the mount.
+      - name: Fetch the one nested submodule WABT needs
+        run: git -C wabt submodule update --init --depth 1 third_party/picosha2
+        shell: bash
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Build binary python package
+        env:
+              # Must also be listed in CIBW_ENVIRONMENT_PASS, otherwise it never reaches container-based
+          # (manylinux/musllinux) builds - Windows/macOS inherit the host environment.
+          SETUPTOOLS_SCM_OVERRIDES: ${{ github.event_name == 'push' && '{local_scheme = "no-local-version"}' || '' }}
+          CIBW_ENVIRONMENT_PASS: SETUPTOOLS_SCM_OVERRIDES
+        run: |
+          uvx cibuildwheel \
+            --output-dir wheelhouse \
+            --platform ${{ matrix.cibw_platform }} \
+            --archs ${{ matrix.cibw_archs }}
+        shell: bash
+
+      - name: list ./wheelhouse
+        run: ls ./wheelhouse
+        shell: bash
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-wheels-${{ matrix.artifact_key }}
+          path: ./wheelhouse
+          retention-days: 14
+
+  deploy:
+    needs: [build-sdist, build-wheels]
+    runs-on: ubuntu-latest
+
+    # PyPI on a tag push, otherwise just a build.
+    environment: ${{ github.event_name == 'push' && 'pypi' || 'build' }}
+    permissions:
+      contents: write # required to create the GitHub Release
+      id-token: write # mandatory for trusted publishing
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Download all artifacts dynamically
+        uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: ./all-dist
+
+      - name: Combine artifacts
+        run: |
+          mkdir -p dist
+          find ./all-dist -type f -exec cp {} dist/ \;
+        shell: bash
+
+      - name: list ./dist
+        run: ls ./dist
+        shell: bash
+
+      - name: Resolve tag and version
+        id: meta
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          if [[ "$VERSION" =~ (a|b|rc|alpha|beta|pre)[0-9]*$ ]]; then
+            PRERELEASE=true
+          else
+            PRERELEASE=false
+          fi
+          echo "tag=$TAG"               >> $GITHUB_OUTPUT
+          echo "version=$VERSION"       >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          VERSION=${{ steps.meta.outputs.version }}
+          BODY=$(awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{found=0} found" CHANGELOG.md | sed '/^[[:space:]]*$/d' | head -50)
+          if [ -z "$BODY" ]; then
+            BODY="See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details."
+          fi
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        if: ${{ github.event_name == 'push' }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          body: ${{ steps.changelog.outputs.body }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          files: ./dist/*
+
+      - name: Publish package distributions to PyPI
+        if: ${{ github.event_name == 'push' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+

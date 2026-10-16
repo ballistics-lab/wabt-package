@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Distribution / packaging
+build/
+dist/
+wheelhouse/
+*.egg-info/
+.eggs/
+
+# Environments
+.venv/
+
+# Caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# build_wabt.py output (built on every build from the wabt submodule, shipped inside the wheel)
+src/wabt_package/bin/
+src/wabt_package/wasm2c/
+src/wabt_package/_wabt_version.txt
