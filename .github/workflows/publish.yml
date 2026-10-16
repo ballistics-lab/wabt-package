@@ -10,22 +10,10 @@ on:
       - "**.md"
       - "LICENSE"
   workflow_dispatch:
-    inputs:
-      testpypi:
-        description: "Publish to test pypi"
-        required: false
-        type: boolean
-        default: false
-      version:
-        description: "Override version (e.g. 1.0.42.0b1) — required for TestPyPI to get a clean version instead of a dev suffix"
-        required: false
-        type: string
-        default: ""
 
 # pull_request is build-only: no job below grants publish permissions for it.
 run-name: >
   Build & Publish → ${{ github.event_name == 'push' && 'PyPI' ||
-      github.event_name == 'workflow_dispatch' && inputs.testpypi && 'TestPyPI' ||
       'Build Only' }}
 
 concurrency:
@@ -40,9 +28,8 @@ jobs:
     name: Build SDist
     runs-on: ubuntu-latest
     env:
-      SETUPTOOLS_SCM_PRETEND_VERSION: ${{ inputs.version }}
-      # PyPI/TestPyPI reject local version segments (+g<hash>): strip them only when this run publishes.
-      SETUPTOOLS_SCM_OVERRIDES: ${{ (github.event_name == 'push' || inputs.testpypi) && '{local_scheme = "no-local-version"}' || '' }}
+      # PyPI rejects local version segments (+g<hash>): strip them only when this run publishes.
+      SETUPTOOLS_SCM_OVERRIDES: ${{ github.event_name == 'push' && '{local_scheme = "no-local-version"}' || '' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -146,11 +133,10 @@ jobs:
 
       - name: Build binary python package
         env:
-          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ inputs.version }}
-          # Must also be listed in CIBW_ENVIRONMENT_PASS, otherwise it never reaches container-based
+              # Must also be listed in CIBW_ENVIRONMENT_PASS, otherwise it never reaches container-based
           # (manylinux/musllinux) builds - Windows/macOS inherit the host environment.
-          SETUPTOOLS_SCM_OVERRIDES: ${{ (github.event_name == 'push' || inputs.testpypi) && '{local_scheme = "no-local-version"}' || '' }}
-          CIBW_ENVIRONMENT_PASS: SETUPTOOLS_SCM_PRETEND_VERSION SETUPTOOLS_SCM_OVERRIDES
+          SETUPTOOLS_SCM_OVERRIDES: ${{ github.event_name == 'push' && '{local_scheme = "no-local-version"}' || '' }}
+          CIBW_ENVIRONMENT_PASS: SETUPTOOLS_SCM_OVERRIDES
         run: |
           uvx cibuildwheel \
             --output-dir wheelhouse \
@@ -173,9 +159,8 @@ jobs:
     needs: [build-sdist, build-wheels]
     runs-on: ubuntu-latest
 
-    # Real PyPI on a tag push, TestPyPI on an explicit opt-in dispatch, otherwise just a build.
-    environment: ${{ github.event_name == 'push' && 'pypi' ||
-      (github.event_name == 'workflow_dispatch' && inputs.testpypi) && 'testpypi' || 'build' }}
+    # PyPI on a tag push, otherwise just a build.
+    environment: ${{ github.event_name == 'push' && 'pypi' || 'build' }}
     permissions:
       contents: write # required to create the GitHub Release
       id-token: write # mandatory for trusted publishing
@@ -243,9 +228,3 @@ jobs:
         with:
           skip-existing: true
 
-      - name: Publish package distributions to TestPyPI
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.testpypi == true }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          skip-existing: true
-          repository-url: https://test.pypi.org/legacy/
